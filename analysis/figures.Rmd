@@ -1,10 +1,11 @@
 ---
 title: "Figures"
 author: "Carina Fan" 
-date: "| Last updated: `r format(Sys.time(), '%B %d, %Y')`"
+date: "Last updated: `r format(Sys.time(), '%B %d, %Y')`"
 output: 
-  github_document:
+  html_document:
     toc: true
+    toc_float: true
 ---
 
 # Set up
