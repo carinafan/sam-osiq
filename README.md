@@ -4,6 +4,8 @@ The results of this study were published in *Memory &amp; Cognition*: https://do
 Supplemental materials can be found on the Open Science Framework: https://osf.io/jd4q8/
 
 ## Directory list
+
 *analysis* - data analysis scripts
+
 *cleaning* - data cleaning scripts
 

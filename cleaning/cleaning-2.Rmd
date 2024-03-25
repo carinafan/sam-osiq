@@ -1,0 +1,161 @@
+---
+title: "Online Study Data Cleaning"
+subtitle: "Further exclusions"
+author: "Carina Fan"  
+date: "Last updated: `r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_knit$set(root.dir = "../data/")
+```
+
+This file runs further exclusions (e.g., for health conditions) after an initial clean for data validity.
+
+# Set up
+
+```{r packages}
+# load packages
+library(psych)
+library(magrittr)
+library(tidyverse)
+```
+
+```{r today}
+today = "2023-07-26"
+```
+
+```{r data}
+df = paste0(today, "-demo-clean.csv") %>% 
+  read.csv(stringsAsFactors = FALSE)
+```
+
+
+<!-- ======================================================================= -->
+
+
+# Exclude based on health history and PHQ
+
+```{r}
+# names of health variables to exclude based on
+healthNames = df %>% 
+  select(starts_with("health_")) %>% 
+  select(-c("health_other", "health_other_text", "health_alcdrug")) %>% 
+  names()
+
+# number of participants endorsing each condition
+df.health = df %>% 
+  select(all_of(healthNames)) %>% 
+  mutate_all(as.character)
+sapply(df.health, function(x) sum(str_count(x, "Yes"), na.rm = TRUE))
+
+# column indices of variables to exclude 
+healthCols = which(names(df) %in% healthNames)
+
+# initialize vector of subjects with neuro conditions 
+healthSubjects = vector(mode = "character")
+
+## if subject responded Yes to any neuro condition, 
+## add their row number to neuroSubject
+for (row in 1:nrow(df)) {
+  for (col in 1:length(healthCols)) {
+    if (df[row, healthCols[col]] == "Yes") {
+      healthSubjects = append(healthSubjects, row)
+    }
+  }
+}
+
+# number of subjects to exclude based on health history
+length(unique(healthSubjects)) 
+
+# number of subjects to exclude based on PHQ (scores >= 20)
+# df$phq_total %<>% as.character() %>% as.numeric()
+# df %>%
+#   filter(phq_total >= 20) %>%
+#   nrow()
+
+# exclude subjects 
+df.clean = df %>% 
+  filter(!row_number() %in% healthSubjects)
+         # phq_total < 20) 
+df.excluded = df |> 
+  filter(row_number() %in% healthSubjects)
+
+# number of participants after all exclusions
+nrow(df.clean)
+```
+
+
+<!-- ======================================================================= -->
+
+
+# Demographics of participants in clean data
+
+```{r}
+# age & edu
+df.clean %>% 
+  select(age, edu) %>% 
+  describe()
+
+# gender
+df.clean %>% 
+  group_by(gender) %>% 
+  summarise(n = n())
+```
+
+
+<!-- ======================================================================= -->
+
+
+# Demographics of previously excluded participants
+
+The following are numbers after excluding for health/neurological history, but retaining participants with high PHQ scores or substance abuse.
+
+```{r}
+df.clean |> 
+  filter(phq_total >= 20) |>
+  group_by(sdam) |> 
+  summarise(n = n())
+```
+
+Of participants with PHQ scores above threshold, `r (580 / (580 + 139) * 100) |> round(1)`% had SDAM. Note that these participants are not excluded from the extraclean data.
+
+```{r}
+df.clean |> 
+  filter(health_alcdrug == "Yes") |> 
+  group_by(sdam) |> 
+  summarise(n = n())
+```
+
+Of participants with alcohol/drug abuse, `r (609 / (609 + 306) * 100) |> round(1)`% had SDAM.
+
+```{r}
+df.clean |> 
+  filter(phq_total >= 20 | health_alcdrug == "Yes") |> 
+  group_by(sdam) |> 
+  summarise(n = n())
+```
+
+Of those with PHQ or substance abuse, `r (1129 / (1129 + 420) * 100) |> round(1)`% had SDAM.
+
+<!-- ======================================================================= -->
+
+
+# Export data
+
+```{r}
+# df.clean %>% 
+#   write.csv(paste0(today, "-demo-extraclean.csv"), row.names = FALSE)
+```
+
+
+<!-- ======================================================================= -->
+
+
+# Session info
+
+```{r session_info, include = TRUE}
+sessionInfo()
+```

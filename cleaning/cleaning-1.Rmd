@@ -1,0 +1,1013 @@
+---
+title: "Online Study Data Cleaning"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_knit$set(root.dir = "../data/")
+```
+
+This script takes the raw csv file downloaded from Qualtrics, organizes the raw data and calculates total scores and reverse codes items when needed, and then outputs the cleaned data. 
+
+To download the raw data from Qualtrics, select the survey "SAM Demo", and export the data using "Download Data Table" (not "Legacy Exporter"). Download the data as a csv, and make sure "Download all fields" and "Use choice text" are checked. Don't check any of the options under "More options". Note that this file will not be correctly opened in Excel, so don't open it in Excel --- read it straight into R. 
+
+Places that should be hard-coded in this script when running on a new raw csv file:
+
+- "date" variable at the top of the script, which is then used to read/create data files 
+- directory of SAM processing script 
+
+The files created by this script are:
+
+- "yyyy-mm-dd-demo-varnames.csv", which contains all of the raw labels in the csv file output by Qualtrics and the corresponding label in the cleaned datasheet 
+
+- "yyyy-mm-dd-demo-dict.csv", which contains information about all the variables included in the cleaned datasheet
+
+- "yyyy-mm-dd-demo-subjectID.xlsx", which contains the assigned subject IDs and corresponding email addresses
+
+- "yyyy-mm-dd-demo-clean.csv", which contains all the cleaned data, ready for analysis
+
+- "yyyy-mm-dd-demo-clean-caught.csv", which contains cleaned data for subjects who failed the catch trials and were thus excluded from the cleaned data for analysis 
+
+
+<!-- ============================================================================= -->
+
+
+# Set up 
+
+```{r date}
+date = "2023-07-26"
+```
+
+```{r packages, message = FALSE}
+# load packages
+library(BBmisc)
+library(lubridate)
+library(writexl)
+library(magrittr)
+library(tidyverse)
+```
+
+```{r load_data}
+# read in raw data downloaded from Qualtrics
+df.raw = paste0(date, "-demo-raw.csv") %>% read.csv()
+```
+
+## Rename variables
+
+```{r rename_variables}
+# retrieve column names from raw file exported from Qualtrics
+raw_column_name = names(df.raw)
+
+# clean up column names 
+clean_column_name = 
+	c("start_date", "end_date", "response_type", "IPaddress", "progress",
+	  "duration", "finished", "recorded_date", "responseID",
+	  "last_name", "first_name", "recipient_email", "external_reference", 
+	  "location_latitude", "location_longitude", 
+	  "distribution_channel", "user_language", "consent",
+	  "gender", "age", "edu", "hand", "gta", "country", "country_text", 
+	  "osiq_s_1", "osiq_s_2", "osiq_s_3", "osiq_o_4", "osiq_s_5", "osiq_s_6",
+	  "osiq_o_7", "osiq_o_8", "osiq_s_9", "osiq_o_10", "osiq_s_11", "osiq_o_12",
+	  "osiq_s_13", "osiq_s_14", "osiq_o_15", "catch1", 
+	  "osiq_o_16", "osiq_o_17", "osiq_s_18",
+	  "osiq_o_19", "osiq_s_20", "osiq_o_21", "osiq_o_22", "osiq_s_23", "osiq_s_24",
+	  "osiq_o_25", "osiq_o_26", "osiq_s_27", "osiq_o_28", "osiq_s_29", "osiq_o_30",
+	  "sam_event_1", "sam_event_2", "sam_event_3", "sam_event_4", 
+	  "sam_event_5", "sam_event_6", "sam_event_7", "sam_event_8",
+	  "field_obs_1", "field_obs_2",
+	  "sam_semantic_1", "sam_semantic_2", "sam_semantic_3", 
+	  "sam_semantic_4", "sam_semantic_5", "sam_semantic_6",
+	  "sam_spatial_1", "sam_spatial_2", "sam_spatial_3", 
+	  "sam_spatial_4", "catch2", "sam_spatial_5", "sam_spatial_6",
+	  "sam_future_1", "sam_future_2", "sam_future_3", 
+	  "sam_future_4", "sam_future_5", "sam_future_6",
+	  "bfi_e_1", "bfi_e_6", "bfi_e_11", "bfi_e_16", 
+	  "bfi_e_21", "bfi_e_26", "bfi_e_31", "bfi_e_36",
+	  "bfas_o_10", "bfas_o_20", "bfas_o_30", "bfas_o_40", "bfas_o_50", 
+	  "bfas_o_60", "bfas_o_70", "bfas_o_80", "bfas_o_90", "bfas_o_100", 
+	  "bfi_a_2", "bfi_a_7", "bfi_a_12", "bfi_a_17", "bfi_a_22", 
+	  "bfi_a_27", "bfi_a_32", "bfi_a_37", "bfi_a_42",
+	  "bfas_i_5", "bfas_i_15", "bfas_i_35", "bfas_i_45", "bfas_i_55", 
+	  "bfas_i_65", "bfas_i_75", "bfas_i_85", "bfas_i_95",
+	  "bfi_c_3", "bfi_c_8", "bfi_c_13", "bfi_c_18", "bfi_c_23", 
+	  "bfi_c_28", "bfi_c_33", "bfi_c_38", "bfi_c_43",
+	  "bfi_n_4", "bfi_n_9", "bfi_n_14", "bfi_n_19", 
+	  "bfi_n_24", "bfi_n_29", "bfi_n_34", "bfi_n_39", 
+	  "bfi_o_5", "bfi_o_10", "bfi_o_15", "bfi_o_20", "bfi_o_25", 
+	  "bfi_o_30", "bfi_o_35", "bfi_o_40", "bfi_o_41", "bfi_o_44",
+	  "hsam", "sdam", 
+	  "health_tbi", "health_stroke", "health_dementia", "health_epilepsy", 
+	  "health_brainsurg", "health_cancer", "health_psychotic", "health_learning", 
+	  "health_alcdrug", "health_cog", "health_other", "health_other_text",
+	  "anxiety", "anxiety_type", "anxiety_tx", "anxiety_rx", "anxiety_rx_text", 
+	  "depression", "depression_episodes", 
+	  "depression_tx", "depression_rx", "depression_rx_text",
+	  "phq_1", "phq_2", "phq_3", "phq_4", "phq_5", 
+	  "phq_6", "phq_7", "phq_8", "phq_9", "phq_function",
+	  "covid_1", "covid_2", "covid_3",
+	  "text_catch", "retired", "job_ifNotRetired", "job_ifRetired", "job_mental",
+	  "email", "email_confirm", "do_not_contact", 
+	  "score", "source", "email_topics")
+
+# create data frame that matches raw to clean column names	
+varnames = cbind(raw_column_name, clean_column_name) %>% as.data.frame(stringsAsFactors = FALSE)
+# write.csv(varnames, paste0(date, "-demo-varnames.csv"), row.names = FALSE)
+
+# rename variables
+
+df = df.raw
+
+names(df) = mapValues(x = names(df),
+                      from = raw_column_name,
+                      to = clean_column_name)
+
+# change class of all variables from factors to strings
+df %<>% mutate_all(as.character)
+```
+
+## Assign subject IDs
+
+```{r subjectID}
+# remove rows that don't correspond to subject data
+df = df[-c(1,2),]
+
+# assign subject IDs
+df$subjectID = paste0("DEM", sprintf("%0.5d", 1:nrow(df)))
+
+# export subject IDs and email addresses
+subjectID = df %>% select(subjectID, email, gta, country)
+# write_xlsx(subjectID, paste0(date, "-demo-subjectID.xlsx"))
+```
+
+## Exclusions
+
+Before any exclusions, there are `r nrow(df)` survey responses. 
+
+```{r exclusions}
+# remove variables that don't need to be in cleaned file
+df = df %>% 
+	select(-c(start_date, end_date, response_type, IPaddress, progress, 
+	          responseID, last_name, first_name, recipient_email, 
+	          external_reference, distribution_channel, user_language, 
+	          consent, score, source, email_topics))
+
+# create copy of dataframe for cleaning excluded rows later
+df.excluded = df
+```
+
+### Incomplete surveys
+
+`r df %>% filter(finished == "False") %>% nrow()` subjects did not finish the entire survey and are now excluded.
+
+```{r exclude_incomplete}
+df %<>% filter(finished == "True")
+```
+
+### Duplicate emails
+
+```{r exclude_duplicate}
+exclude.email = df %>% filter(email != "")
+
+exclude.email = exclude.email[duplicated(exclude.email$email), ]
+
+df %<>% filter(! subjectID %in% exclude.email$subjectID)
+```
+
+Of the complete responses, `r nrow(exclude.email)` responses are duplicate emails and excluded. For duplicates, only the first response is kept. 
+
+### Blocks of suspicious responses
+
+Starting around November 2019, we noticed some suspicious response patterns that are likely bots/spam.
+
+Remove responses that were finished at the same time (rounded to the nearest minute) (n = `r df[(duplicated(df$recorded_date) | duplicated(df$recorded_date, fromLast = TRUE)), ] |> nrow()`):
+
+```{r}
+df$recorded_date %<>% 
+  ymd_hms(tz = "EST") %>% 
+  round_date(unit = "minute")
+
+df = df[!(duplicated(df$recorded_date) | duplicated(df$recorded_date, fromLast = TRUE)), ]
+```
+
+There are also blocks of rows completed over the span of several hours that have suspicious patterns of email addresses (e.g., gibberish, or firstnamelastname###@gmail.com). Closer visual inspection of the data reveals that these sketchy email address responses almost invariably leave what country they live in blank, presumably because it's the only demographics question that the questionnaire doesn't force a response to. The vast majority of responses that look like they are valid have the country filled out. So, by excluding rows that didn't indicate a country of residence, hopefully we can exclude all of the trolls. `r df %>% filter(country == "") %>% nrow()` participants are excluded based on blank country.
+
+**Update, Sept. 19, 2022:** We started recruiting participants in the GTA and found that when participants indicate that they're from the GTA, they're skipped over the country question so it's left blank. We want to retain these participants, so instead of removing all participants with blank country, I'll remove only those who have blank country *and* did not indicate they're from the GTA (n = `r df |> filter(gta == "No" & country == "") |> nrow()`)
+
+```{r}
+# df %<>% filter(country != "")
+df %<>% 
+  filter(!(gta == "No" & country == ""))
+```
+
+### Catch questions
+
+There are 2 "catch" questions to make sure participants are paying attention, where the question instructs them to select a specific response. Remove participants who didn't select the required response.
+
+For catch 1, subjects are to select "Totally agree". For catch 2, subjects are to select "Neither agree nor disagree". 
+
+In August 2018, we also added a text catch question that required subjects to enter the answer to an arithmetic problem in a text box.
+
+```{r exclude_catch}
+# catch 1
+exclude.catch1 = df %>% 
+  filter(catch1 != "Totally agree" | is.na(catch1) == TRUE) %>% 
+  select(subjectID)
+
+# catch 2
+exclude.catch2 = df %>%
+  filter(catch2 != "Neither Agree nor Disagree" | is.na(catch2) == TRUE) %>% 
+  select(subjectID)
+
+# text catch
+
+df$text_catch %<>% tolower()
+
+exclude.textcatch = df %>% 
+  filter(recorded_date > "2018-08-13 12:00:00") %>% 
+  filter(!grepl(pattern = "10|ten", x = text_catch)) %>%
+  select(subjectID)
+
+# remove subjects who failed at least one catch question
+
+exclude.catch = rbind(exclude.catch1, exclude.catch2)
+
+exclude.catch %<>% 
+  rbind(exclude.textcatch) %>% 
+  unique()
+
+df %<>% filter(! subjectID %in% exclude.catch$subjectID)
+```
+
+After removing incomplete responses, duplicate emails, and responses with blank countries, `r nrow(exclude.catch1)` subjects failed catch question 1, `r nrow(exclude.catch2)` failed catch question 2, and `r nrow(exclude.textcatch)` subjects failed the text catch. A total of `r nrow(exclude.catch)` subjects are excluded for failing at least 1 of these 3 catch questions.
+
+### Education outliers
+
+```{r exclude_edu_age}
+df$edu %<>% as.numeric()
+
+exclude.edu = df %>% filter(edu < 9 | edu > 26)
+
+df %<>% filter(! subjectID %in% exclude.edu$subjectID)
+```
+
+After excluding catch question fails, `r nrow(exclude.edu)` report having either less than 9 or more than 26 years of education and are excluded.
+
+## Export excluded subjects to separate file for cleaning.
+
+```{r clean_excluded}
+df.excluded %<>% filter(! subjectID %in% df$subjectID)
+
+# run separate cleaning script
+# source("../cleaning/demo-cleaning-excluded.R")
+```
+
+## Number of subjects for analysis
+
+After all exclusions, there are `r nrow(df)` subjects left for analysis. 
+
+Check that the number of rows in the clean dataframe plus the number of rows in the excluded dataframe equal the number of rows in the raw data:
+
+```{r exclusion_check}
+nrow(df.raw) - 2 == nrow(df) + nrow(df.excluded)
+```
+
+
+<!-- ============================================================================= -->
+
+
+# Demographics
+
+```{r demographics}
+# select demographics variables
+df.dem = df %>% 
+  select(c(subjectID, recorded_date, do_not_contact, gender, age, edu, hand, gta,
+           location_latitude, location_longitude, country, country_text, 
+           field_obs_1, field_obs_2, hsam, sdam,
+           retired, job_ifNotRetired, job_ifRetired, job_mental,
+           starts_with("health"), starts_with("anxiety"), starts_with("depression"), starts_with(("covid"))))
+```
+
+
+<!-- ============================================================================= -->
+
+
+# OSIQ
+
+```{r osiq}
+# create new dataframe that only contains OSIQ items
+df.osiq = df %>% select(c(subjectID, starts_with("osiq")))
+
+# replace text in responses with numbers
+for (row in 1:nrow(df.osiq)) {
+  for (col in 2:ncol(df.osiq)) {
+    switch(df.osiq[row, col],
+           "Totally disagree"           = {df.osiq[row, col] = 1},
+           "Disagree somewhat"          = {df.osiq[row, col] = 2},
+           "Neither agree nor disagree" = {df.osiq[row, col] = 3},
+           "Agree somewhat"             = {df.osiq[row, col] = 4},
+           "Totally agree"              = {df.osiq[row, col] = 5}
+           )
+  }
+}
+
+# change class of all variables from strings to numeric
+for (i in 2:ncol(df.osiq)) {
+  df.osiq[ , i] = df.osiq[ , i] %>% as.numeric()
+}
+
+# reverse coding
+df.osiq$osiq_s_27r = 6 - df.osiq$osiq_s_27
+df.osiq$osiq_s_27 = NULL
+
+# domain scores
+df.osiq$osiq_s = df.osiq %>% select(starts_with("osiq_s")) %>% rowMeans()
+df.osiq$osiq_o = df.osiq %>% select(starts_with("osiq_o")) %>% rowMeans()
+```
+
+
+<!-- ============================================================================= -->
+
+
+# SAM
+
+```{r sam}
+# create new dataframe that only contains SAM items
+df.sam = df %>% select(c(subjectID, starts_with("sam")))
+
+# replace text in responses with numbers
+for (row in 1:nrow(df.sam)) {
+  for (col in 2:ncol(df.sam)) {
+    switch(df.sam[row, col],
+           "Strongly Disagree"           = {df.sam[row, col] = 1},
+           "Disagree Somewhat"           = {df.sam[row, col] = 2},
+           "Neither Agree nor Disagree"  = {df.sam[row, col] = 3},
+           "Neither Agree  nor Disagree" = {df.sam[row, col] = 3},
+           "Agree Somewhat"              = {df.sam[row, col] = 4},
+           "Strongly Agree"              = {df.sam[row, col] = 5}
+           )
+  }
+}
+
+# change class of all variables from strings to numeric
+for (i in 2:ncol(df.sam)) {
+  df.sam[ , i] = df.sam[ , i] %>% as.numeric()
+}
+
+# reorder columns
+df.sam = df.sam[ , order(names(df.sam))] %>% select(subjectID, everything())
+
+# load script to calculate domain scores
+source("P:/coding/r_functions/score_sam.R")
+df.sam %<>% score_sam()
+
+# reverse coding
+sam.reverse = c("sam_event_1", "sam_event_2", 
+                "sam_semantic_2", "sam_semantic_5", 
+                "sam_spatial_3", "sam_spatial_4", "sam_future_6")
+
+for (i in 1:length(sam.reverse)) {
+  df.sam[ , (ncol(df.sam) + 1)] = NA # add an empty column for the reverse coded item
+  names(df.sam)[ncol(df.sam)] = paste0(sam.reverse[i], "r") # rename empty column
+  colToReverse = which(names(df.sam) == sam.reverse[i]) # retrieve index of item to be reversed
+  df.sam[ , ncol(df.sam)] = 6 - df.sam[ , colToReverse] # reverse code the item
+  df.sam[ , colToReverse] = NULL # remove the original item score
+}
+
+# reorder columns
+df.sam = df.sam[ , order(names(df.sam))] %>% select(subjectID, everything())
+df.sam %<>% select(
+  subjectID,
+  starts_with("sam_event"), starts_with("sam_future"), starts_with("sam_semantic"), starts_with("sam_spatial"),
+  sam_epi, sam_fut, sam_sem, sam_spa
+)
+```
+
+
+<!-- ============================================================================= -->
+
+
+# BFI
+
+```{r bfi}
+# create new dataframe that only contains BFI items
+df.bfi = df %>% select(c(subjectID, starts_with("bfi")))
+
+# replace text in responses with numbers
+for (row in 1:nrow(df.bfi)) {
+  for (col in 2:ncol(df.bfi)) {
+    switch(df.bfi[row, col],
+           "Disagree strongly"           = {df.bfi[row, col] = 1},
+           "Disagree a little"           = {df.bfi[row, col] = 2},
+           "Neither agree nor disagree"  = {df.bfi[row, col] = 3},
+           "Agree a little"              = {df.bfi[row, col] = 4},
+           "Agree strongly"              = {df.bfi[row, col] = 5}
+           )
+  }
+}
+
+# change class of all variables from strings to numeric
+for (i in 2:ncol(df.bfi)) {
+  df.bfi[ , i] = df.bfi[ , i] %>% as.numeric()
+}
+
+# reverse coding
+bfi.reverse = c("bfi_e_6", "bfi_e_21", "bfi_e_31",
+                "bfi_a_2", "bfi_a_12", "bfi_a_27", "bfi_a_37",
+                "bfi_c_8", "bfi_c_18", "bfi_c_23", "bfi_c_43",
+                "bfi_n_9", "bfi_n_24", "bfi_n_34",
+                "bfi_o_35", "bfi_o_41")
+
+for (i in 1:length(bfi.reverse)) {
+  df.bfi[ , (ncol(df.bfi) + 1)] = NA # add an empty column for the reverse coded item
+  names(df.bfi)[ncol(df.bfi)] = paste0(bfi.reverse[i], "r") # rename empty column
+  colToReverse = which(names(df.bfi) == bfi.reverse[i]) # retrieve index of item to be reversed
+  df.bfi[ , ncol(df.bfi)] = 6 - df.bfi[ , colToReverse] # reverse code the item
+  df.bfi[ , colToReverse] = NULL # remove the original item score
+}
+
+# reorder columns
+df.bfi = df.bfi[ , order(names(df.bfi))] %>% select(subjectID, everything())
+
+# domain scores
+df.bfi$bfi_e = df.bfi %>% select(starts_with("bfi_e")) %>% rowMeans()
+df.bfi$bfi_a = df.bfi %>% select(starts_with("bfi_a")) %>% rowMeans()
+df.bfi$bfi_c = df.bfi %>% select(starts_with("bfi_c")) %>% rowMeans()
+df.bfi$bfi_n = df.bfi %>% select(starts_with("bfi_n")) %>% rowMeans()
+df.bfi$bfi_o = df.bfi %>% select(starts_with("bfi_o")) %>% rowMeans()
+```
+
+
+<!-- ============================================================================= -->
+
+
+# BFAS
+
+```{r bfas}
+# create new dataframe that only contains BFAS items
+df.bfas = df %>% select(c(subjectID, starts_with("bfas")))
+
+# replace text in responses with numbers
+for (row in 1:nrow(df.bfas)) {
+  for (col in 2:ncol(df.bfas)) {
+    switch(df.bfas[row, col],
+           "Disagree strongly"           = {df.bfas[row, col] = 1},
+           "Disagree a little"           = {df.bfas[row, col] = 2},
+           "Neither agree nor disagree"  = {df.bfas[row, col] = 3},
+           "Agree a little"              = {df.bfas[row, col] = 4},
+           "Agree strongly"              = {df.bfas[row, col] = 5}
+           )
+  }
+}
+
+# change class of all variables from strings to numeric
+for (i in 2:ncol(df.bfas)) {
+  df.bfas[ , i] = df.bfas[ , i] %>% as.numeric()
+}
+
+# reverse coding
+bfas.reverse = c("bfas_i_15", "bfas_i_45", "bfas_i_55", "bfas_i_85",
+                 "bfas_o_50", "bfas_o_60", "bfas_o_80", "bfas_o_90")
+
+for (i in 1:length(bfas.reverse)) {
+  df.bfas[ , (ncol(df.bfas) + 1)] = NA # add an empty column for the reverse coded item
+  names(df.bfas)[ncol(df.bfas)] = paste0(bfas.reverse[i], "r") # rename empty column
+  colToReverse = which(names(df.bfas) == bfas.reverse[i]) # retrieve index of item to be reversed
+  df.bfas[ , ncol(df.bfas)] = 6 - df.bfas[ , colToReverse] # reverse code the item
+  df.bfas[ , colToReverse] = NULL # remove the original item score
+}
+
+# reorder columns
+df.bfas = df.bfas[ , order(names(df.bfas))] %>% select(subjectID, everything())
+
+# domain scores
+df.bfas$bfas_oi = df.bfas %>% select(starts_with("bfas")) %>% rowMeans()
+```
+
+
+<!-- ============================================================================= -->
+
+
+# PHQ
+
+```{r phq}
+# create new dataframe that only contains PHQ items
+df.phq = df %>% select(c(subjectID, starts_with("phq")))
+
+# replace text in responses with numbers
+for (row in 1:nrow(df.phq)) {
+  for (col in 2:(ncol(df.phq)-1)) {
+    switch(df.phq[row, col],
+           "Not at all"              = {df.phq[row, col] = 0},
+           "Several days"            = {df.phq[row, col] = 1},
+           "More than half the days" = {df.phq[row, col] = 2},
+           "Nearly every day"        = {df.phq[row, col] = 3}
+           )
+  }
+}
+
+# change class of all variables from strings to numeric
+for (i in 2:(ncol(df.phq)-1)) {
+  df.phq[ , i] = df.phq[ , i] %>% as.numeric()
+}
+
+# total score
+df.phq$phq_total = df.phq %>%
+  select(starts_with("phq")) %>%
+  select(-phq_function) %>%
+  rowSums()
+```
+
+
+<!-- ============================================================================= -->
+
+
+# Merge clean dataframes
+
+```{r merge}
+df.clean = Reduce(function(x, y) merge(x, y, by = "subjectID"), 
+                  list(df.dem,
+                       df.osiq,
+                       df.sam,
+                       df.bfi,
+                       df.bfas,
+                       df.phq))
+
+# write.csv(df.clean, paste0(date, "-demo-clean.csv"), row.names = FALSE)
+```
+
+
+<!-- ============================================================================= -->
+
+
+<!-- Data dictionary -->
+
+
+```{r dictionary, echo = FALSE}
+# export column names from clean dataframe
+dict = names(df.clean) %>% as.data.frame(stringsAsFactors = FALSE) 
+names(dict) = "column_label"
+
+# add columns to describe the variables in each column
+dict$description = NA
+dict$type = NA
+dict$value_range = NA
+
+# fill in descriptive information
+for (i in 1:ncol(df.clean)) {
+  
+  # fill in value range and type wherever possible, based on strings in column name
+  switch(substr(dict$column_label[i], 1, 4),
+    "heal" = {
+		  dict$value_range[i] = "yes or no"
+		  dict$type[i]        = "general health history"
+		},
+		"anxi" = {
+		  dict$type[i]        = "history of anxiety" 
+		},
+		"depr" = {
+		  dict$type[i]        = "history of depression"
+		},
+		"sam_" = {
+			dict$value_range[i]	= "Likert scale from 1 (strongly disagree) to 5 (agree strongly)"
+			dict$type[i] 	    	= "Survey of Autobiographical Memory (SAM)"
+		},
+		"osiq" = {
+			dict$value_range[i]	= "Likert scale from 1 (totally disagree) to 5 (totally agree)"
+			dict$type[i] 	    	= "Object-Spatial Imagery Questionnaire (OSIQ)"
+		},
+		"bfi_" = {
+			dict$value_range[i] = "Likert scale from 1 (disagree strongly) to 5 (agree strongly)"
+			dict$type[i]	    	= "Big Five Inventory (BFI)"
+		},
+		"bfas" = {
+		  dict$value_range[i] = "Likert scale from 1 (disagree strongly) to 5 (agree strongly)"
+		  dict$type[i]        = "Big Five Aspect Scales (BFAS)"
+		},
+		"phq_" = {
+		  dict$value_range[i] = "Likert scale from 0 (not at all) to 3 (nearly every day)"
+		  dict$type[i]        = "Patient Health Questionnaire (PHQ); brief depression severity measure"
+		}
+	)
+  
+  switch(names(df.clean[i]),
+         
+    # demographic and testing information
+    
+    "subjectID" = {
+      dict$description[i]	= "subject ID number"
+      dict$value_range[i]	= "from 1 to the total number of subjects"
+      dict$type[i] 		    = "testing information"	
+    },
+    "recorded_date" = {
+      dict$description[i] = "date survey was finished"
+      dict$value_range[i] = "date"
+      dict$type[i]        = "testing information"
+    }, 
+    "do_not_contact" = {
+      dict$description[i] = "whether subject wishes to be contacted by researcher"
+      dict$value_range[i] = "either blank or 'I do not wish to be contacted'"
+      dict$type[i]         = "testing information"
+    },
+    "gender" = {
+			dict$description[i]	= "self-reported gender"
+			dict$value_range[i]	= "male, female, or prefer not to answer"
+			dict$type[i]		    = "demographic information"	
+		},
+		"age" = {
+			dict$description[i]	= "self-reported age in years"
+			dict$value_range[i]	= "50 and older"
+			dict$type[i]		    = "demographic information"	
+		},
+		"edu" = {
+			dict$description[i]	= "'How many years of formal schooling have you had?'"
+			dict$value_range[i]	= "9 to 26 years (subjects outside this range were excluded from analysis)"
+			dict$type[i] 		    = "demographic information"	
+		},
+		"hand" = {
+			dict$description[i]	= "subject's handedness"
+			dict$value_range[i]	= "right, left, or both"
+			dict$type[i] 	    	= "demographic information"	
+		},
+		"gta" = {
+		  dict$description[i] = "whether subject lives in Greater Toronto Area (GTA)"
+		  dict$value_range[i] = "yes or no"
+		  dict$type[i]        = "demographic information"
+		},
+		"location_latitude" = {
+		  dict$description[i] = "subject's geographical latitude"
+		  dict$value_range[i] = "0 to 90"
+		  dict$type[i]        = "demographic information"
+		},
+		"location_longitude" = {
+		  dict$description[i] = "subject's geographical longitude"
+		  dict$value_range[i] = "0 to 180"
+		  dict$type[i]        = "demographic information"
+		},
+		"country" = {
+		  dict$description[i] = "country of subject's residence"
+		  dict$value_range[i] = "Canada, US, or other"
+		  dict$type[i]        = "demographic information"
+		},
+		"country_text" = {
+		  dict$description[i] = "country of subject's residence, if outside US or Canada"
+		  dict$value_range[i] = "subject enters text"
+		  dict$type[i]        = "demographic information"
+		},
+		"field_obs_1" = {
+		  dict$description[i] = "whether subjects recalls memories from original point of view"
+		  dict$value_range[i] = "Likert scale from 1 (strongly disagree) to 5 (strongly agree)"
+		  dict$type[i]        = "self-reported memory qualities"
+		},
+		"field_obs_2" = {
+		  dict$description[i] = "whether subjects recalls memories from outside point of view"
+		  dict$value_range[i] = "Likert scale from 1 (strongly disagree) to 5 (strongly agree)"
+		  dict$type[i]        = "self-reported memory qualities"
+		},
+		"hsam" = {
+		  dict$description[i] = "whether subject reports having HSAM"
+		  dict$value_range[i] = "yes or no"
+		  dict$type[i]        = "self-reported memory qualities"
+		},
+		"sdam" = {
+		  dict$description[i] = "whether subject reports having SDAM"
+		  dict$value_range[i] = "yes or no"
+		  dict$type[i]        = "self-reported memory qualities"
+		},
+		"retired" = {
+			dict$description[i]	= "whether subject is retired"
+			dict$value_range[i]	= "yes or no"
+			dict$type[i]		= "demographic information"	
+		},
+		"job_ifNotRetired" = {
+			dict$description[i]	= "if not retired, subject's primary occupation"
+			dict$value_range[i]	= "subject enters text"
+			dict$type[i]		= "demographic information"	
+		},
+		"job_ifRetired" = {
+			dict$description[i]	= "if retired, subject's primary occupation when working"
+			dict$value_range[i]	= "subject enters text"
+			dict$type[i]		= "demographic information"	
+		},
+		"job_mental" = {
+			dict$description[i]	= 
+			  "'How would you rate the mental/intellectual demands of your occupation?'"
+			dict$value_range[i]	= "5-point Likert scale from 'not demanding at all' to 'highly demanding'"
+			dict$type[i] 		= "demographic information"	
+		},
+		"covid_1" = {
+		  dict$description[i] = 
+		    "'Please indicate if your responses to this questionnaire are affected by the COVID-19 pandemic.'"
+		  dict$value_range[i] = "4-point Likert scale from not at all affected to highly affected"
+		  dict$type[i] = "testing information"
+		},
+		"covid_2" = {
+		  dict$description[i] = 
+		    "'Please indicate if you are affected by any of the following: social isolation, work disruption, unemployment, illness at home, hospitalization, none of the above'"
+		  dict$value_range[i] = "Any combination of the listed options"
+		  dict$type[i] = "testing information"
+		},
+		"covid_3" = {
+		  dict$description[i] = "space for other COVID-related comments"
+		  dict$value_range[i] = "subject enters text"
+		  dict$type[i] = "testing information"
+		},
+		
+		# general health history
+		
+		"health_tbi" = {
+		  dict$description[i] = "whether subject has had head injury/concussion with loss of consciousness >15 min"
+		},
+		"health_stroke" = {
+		  dict$description[i] = "whether subject has had stroke requiring hospitalization"
+		},
+		"health_dementia" = {
+		  dict$description[i] = "whether subject has had dementia or other neurodegenerative disease"
+		},
+		"health_epilepsy" = {
+		  dict$description[i] = "whether subject has had epilepsy"
+		},
+		"health_brainsurg" = {
+		  dict$description[i] = "whether subject has had brain surgery"
+		},
+		"health_cancer" = {
+		  dict$description[i] = "whether subject has had cancer"
+		},
+		"health_psychotic" = {
+		  dict$description[i] = "whether subject has had psychotic disorder requiring hospitalization"
+		},
+		"health_alcdrug" = {
+		  dict$description[i] = "whether subject has had alcohol or drug abuse"
+		},
+		"health_learning" = {
+		  dict$description[i] = "whether subject has had a learning disorder"
+		},
+		"health_cog" = {
+		  dict$description[i] = "whether subject has had significant decline in cognition over that past few years that affects everyday function"
+		},
+		"health_other" = {
+		  dict$description[i] = "whether subject has any other condition that could affect thinking or memory"
+		},
+		"health_other_text" = {
+		  dict$description[i] = "other health problems subject has had"
+		  dict$value_range[i] = "subject enters text"
+		},
+		
+		# history of anxiety and depression
+		
+		"anxiety" = {
+		  dict$description[i] = "whether subject has ever suffered significant anxiety"
+		  dict$value_range[i] = "yes or no"
+		},
+		"anxiety_type" = {
+		  dict$description[i] = "type of anxiety"
+		  dict$value_range[i] = "any combination of frequent panic attacks, obsessive compulsive disorder, post-traumatic stress disorder, or generalized anxiety"
+		},
+		"anxiety_tx" = {
+		  dict$description[i] = "whether subject received treatment for anxiety"
+		  dict$value_range[i] = "yes or no"
+		},
+		"anxiety_rx" = {
+		  dict$description[i] = "type of anxiety treatment"
+		  dict$value_range[i] = "any combination of psychotherapy, medication, hospitalization, or other"
+		},
+		"anxiety_rx_text" = {
+		  dict$description[i] = "type of anxiety treatment (if other)"
+		  dict$value_range[i] = "subject enters text"
+		},
+		"depression" = {
+		  dict$description[i] = "whether subject has ever been diagnosed with major depression"
+		  dict$value_range[i] = "yes or no"
+		},
+		"depression_episodes" = {
+		  dict$description[i] = "number of episodes of major depression"
+		  dict$value_range[i] = "1, 2-4, or 5+"
+		},
+		"depression_tx" = {
+		  dict$description[i] = "whether subject received treatment for depression"
+		  dict$value_range[i] = "yes or no"
+		},
+		"depression_rx" = {
+		  dict$description[i] = "type of depression treatment"
+		  dict$value_range[i] = "any combination of psychotherapy, medication, hospitalization, or other"
+		},
+		"depression_rx_text" = {
+		  dict$description[i] = "type of depression treatment (if other)"
+		  dict$value_range[i] = "subject enters text"
+		},
+		
+		# OSIQ
+		
+		"osiq_s_1" 		= {dict$description[i]	= "item 1 (spatial)"},
+		"osiq_s_2" 		= {dict$description[i]	= "item 2 (spatial)"},
+		"osiq_s_3" 		= {dict$description[i]	= "item 3 (spatial)"},
+		"osiq_o_4" 		= {dict$description[i]	= "item 4 (object)"},
+		"osiq_s_5" 		= {dict$description[i]	= "item 5 (spatial)"},
+		"osiq_s_6" 		= {dict$description[i]	= "item 6 (spatial)"},
+		"osiq_o_7" 		= {dict$description[i]	= "item 7 (object)"},
+		"osiq_o_8" 		= {dict$description[i]	= "item 8 (object)"},
+		"osiq_s_9" 		= {dict$description[i]	= "item 9 (spatial)"},
+		"osiq_o_10" 	= {dict$description[i]	= "item 10 (object)"},
+		"osiq_s_11" 	= {dict$description[i]	= "item 11 (spatial)"},
+		"osiq_o_12" 	= {dict$description[i]	= "item 12 (object)"},
+		"osiq_s_13" 	= {dict$description[i]	= "item 13 (spatial)"},
+		"osiq_s_14" 	= {dict$description[i]	= "item 14 (spatial)"},
+		"osiq_o_15" 	= {dict$description[i]	= "item 15 (object)"},
+		"osiq_o_16" 	= {dict$description[i]	= "item 16 (object)"},
+		"osiq_o_17" 	= {dict$description[i]	= "item 17 (object)"},
+		"osiq_s_18" 	= {dict$description[i]	= "item 18 (spatial)"},
+		"osiq_o_19" 	= {dict$description[i]	= "item 19 (object)"},
+		"osiq_s_20" 	= {dict$description[i]	= "item 20 (spatial)"},
+		"osiq_o_21" 	= {dict$description[i]	= "item 21 (object)"},
+		"osiq_o_22" 	= {dict$description[i]	= "item 22 (object)"},
+		"osiq_s_23" 	= {dict$description[i]	= "item 23 (spatial)"},
+		"osiq_s_24" 	= {dict$description[i]	= "item 24 (spatial)"},
+		"osiq_o_25" 	= {dict$description[i]	= "item 25 (object)"},
+		"osiq_o_26" 	= {dict$description[i]	= "item 26 (object)"},
+		"osiq_s_27r" 	= {dict$description[i]	= "item 27 (spatial), reverse coded"},
+		"osiq_o_28" 	= {dict$description[i]	= "item 28 (object)"},
+		"osiq_s_29" 	= {dict$description[i]	= "item 29 (spatial)"},
+		"osiq_o_30" 	= {dict$description[i]	= "item 30 (object)"},
+		"osiq_s" = {
+			dict$description[i]	= 
+			  "spatial domain score, calculated as the average score across spatial items"
+			dict$value_range[i]	= "1 to 5"
+		},
+		"osiq_o" = {
+			dict$description[i]	= 
+			  "object domain score, calculated as the average score across object items"
+			dict$value_range[i]	= "1 to 5"
+		},
+    
+		# SAM
+		
+		"sam_event_1r" 	  = {dict$description[i]	= "'Specific events are difficult for me to recall' (reverse coded)"},
+		"sam_event_2r" 		= {dict$description[i]	= "'When I remember events, I have a hard time determining the order of details in the event' (reverse coded)"},
+		"sam_event_3" 		= {dict$description[i]	= "'When I remember events, in general I can recall objects that were in the environment'"},
+		"sam_event_4" 		= {dict$description[i]	= "'When I remember events, in general I can recall what I was wearing'"},
+		"sam_event_5" 		= {dict$description[i]	= "'I am highly confident in my ability to remember past events'"},
+		"sam_event_6" 		= {dict$description[i]	= "'When I remember events, I remember a lot of details'"},
+		"sam_event_7" 		= {dict$description[i]	= "'When I remember events, in general I can recall which day of the week it was'"},
+		"sam_event_8" 		= {dict$description[i]	= "'When I remember events, in general I can recall people, what they looked like, or what they were wearing'"},
+		"sam_future_1"		= {dict$description[i]	= "'When I imagine an event in the future, the event generates vivid mental images that are specific in time and place
+'"},
+		"sam_future_2" 		= {dict$description[i]	= "'When I imagine an event in the future, I can picture the spatial layout'"},
+		"sam_future_3" 		= {dict$description[i]	= "'When I imagine an event in the future, I can picture people and what they look like'"},
+		"sam_future_4" 		= {dict$description[i]	= "'When I imagine an event in the future, I can imagine how I may feel'"},
+		"sam_future_5" 		= {dict$description[i]	= "'When I imagine an event in the future, I can picture images (e.g., people, objects, etc)'"},
+		"sam_future_6r" 	= {dict$description[i]	= "'I have a difficult time imagining specific events in the future' (reverse coded)"},
+		"sam_semantic_1" 	= {dict$description[i]	= "'I can learn and repeat facts easily, even if I don’t remember where I learned them'"},
+		"sam_semantic_2r" = {dict$description[i]	= "'After I have read a novel or newspaper, I forget the facts after a few days' (reverse coded)"},
+		"sam_semantic_3" 	= {dict$description[i]	= "'After I have met someone once, I easily remember his or her name'"},
+		"sam_semantic_4" 	= {dict$description[i]	= "'I can easily remember the names of famous people (sports figures, politicians, celebrities)'"},
+		"sam_semantic_5r" = {dict$description[i]	= "'I have a hard time remembering information I have learned at school or work' (reverse coded)"},
+		"sam_semantic_6" 	= {dict$description[i]	= "'I am very good at remembering information about people that I know (e.g., the names of a co-worker’s children, their personalities, places friends have visited etc.)'"},
+		"sam_spatial_1" 	= {dict$description[i]	= "'In general, my ability to navigate is better than most of my family/friends'"},
+		"sam_spatial_2" 	= {dict$description[i]	= "'After I have visited an area, it is easy for me to find my way around the second time I visit'"},
+		"sam_spatial_3r" 	= {dict$description[i]	= "'I have a hard time judging the distance (e.g., in meters or kilometers) between familiar landmarks' (reverse coded)"},
+		"sam_spatial_4r" 	= {dict$description[i]	= "'I get lost easily, even in familiar areas' (reverse coded)"},
+		"sam_spatial_5" 	= {dict$description[i]	= "'If my route to work or school was blocked, I could easily find the next fastest way to get there'"},
+		"sam_spatial_6" 	= {
+		  dict$description[i]	= "'I use specific landmarks for navigating'"
+		  dict$value_range[i] = 
+		    "approximately normally distributed around a mean score of 100"
+		  },
+		"sam_epi" 		    = {
+		  dict$description[i]	= "total weighted score for episodic/event domain"
+		  dict$value_range[i] = 
+		    "approximately normally distributed around a mean score of 100"
+		  },
+		"sam_sem" 		    = {
+		  dict$description[i]	= "total weighted score for semantic domain"
+		  dict$value_range[i] = 
+		    "approximately normally distributed around a mean score of 100"},
+		"sam_spa" 		    = {
+		  dict$description[i]	= "total weighted score for spatial domain"
+		  dict$value_range[i] = 
+		    "approximately normally distributed around a mean score of 100"
+		  },
+		"sam_fut" 		    = {
+		  dict$description[i]	= "total weighted score for future domain"
+		  dict$value_range[i] = 
+		    "approximately normally distributed around a mean score of 100"
+		  },
+
+		# BFI
+		
+		"bfi_e_1" 	= {dict$description[i] = "item 1 (extraversion)"},
+		"bfi_e_6r" 	= {dict$description[i] = "item 6 (extraversion), reverse coded"}, 
+		"bfi_e_11" 	= {dict$description[i] = "item 11 (extraversion)"}, 
+		"bfi_e_16" 	= {dict$description[i] = "item 16 (extraversion)"}, 
+		"bfi_e_21r" = {dict$description[i] = "item 21 (extraversion), reverse coded"}, 
+		"bfi_e_26" 	= {dict$description[i] = "item 26 (extraversion)"}, 
+		"bfi_e_31r" = {dict$description[i] = "item 31 (extraversion), reverse coded"}, 
+		"bfi_e_36"  = {dict$description[i] = "item 36 (extraversion)"},
+		"bfi_a_2r" 	= {dict$description[i] = "item 2 (agreeableness), reverse coded"},
+		"bfi_a_7" 	= {dict$description[i] = "item 7 (agreeableness)"},
+		"bfi_a_12r"	= {dict$description[i] = "item 12 (agreeableness), reverse coded"}, 
+		"bfi_a_17" 	= {dict$description[i] = "item 17 (agreeableness)"}, 
+		"bfi_a_22" 	= {dict$description[i] = "item 22 (agreeableness)"},
+		"bfi_a_27r" = {dict$description[i] = "item 27 (agreeableness), reverse coded"},
+		"bfi_a_32" 	= {dict$description[i] = "item 32 (agreeableness)"},
+		"bfi_a_37r" = {dict$description[i] = "item 37 (agreeableness), reverse coded"},
+		"bfi_a_42" 	= {dict$description[i] = "item 42 (agreeableness)"},
+		"bfi_c_3" 	= {dict$description[i] = "item 3 (conscientiousness)"},
+		"bfi_c_8r" 	= {dict$description[i] = "item 8 (conscientiousness), reverse coded"},
+		"bfi_c_13" 	= {dict$description[i] = "item 13 (conscientiousness)"},
+		"bfi_c_18r" = {dict$description[i] = "item 18 (conscientiousness), reverse coded"},
+		"bfi_c_23r" = {dict$description[i] = "item 23 (conscientiousness), reverse coded"},
+		"bfi_c_28" 	= {dict$description[i] = "item 28 (conscientiousness)"},
+		"bfi_c_33" 	= {dict$description[i] = "item 33 (conscientiousness)"},
+		"bfi_c_38" 	= {dict$description[i] = "item 38 (conscientiousness)"},
+		"bfi_c_43r" = {dict$description[i] = "item 43 (conscientiousness), reverse coded"},
+		"bfi_n_4" 	= {dict$description[i] = "item 4 (neuroticism)"},
+		"bfi_n_9r" 	= {dict$description[i] = "item 9 (neuroticism), reverse coded"},
+		"bfi_n_14" 	= {dict$description[i] = "item 14 (neuroticism)"},
+		"bfi_n_19" 	= {dict$description[i] = "item 19 (neuroticism)"},
+		"bfi_n_24r"	= {dict$description[i] = "item 24 (neuroticism), reverse coded"},
+		"bfi_n_29" 	= {dict$description[i] = "item 29 (neuroticism)"},
+		"bfi_n_34r" = {dict$description[i] = "item 34 (neuroticism), reverse coded"},
+		"bfi_n_39" 	= {dict$description[i] = "item 39 (neuroticism)"}, 
+		"bfi_o_5" 	= {dict$description[i] = "item 5 (openness)"},
+		"bfi_o_10" 	= {dict$description[i] = "item 10 (openness)"},
+		"bfi_o_15" 	= {dict$description[i] = "item 15 (openness)"},
+		"bfi_o_20" 	= {dict$description[i] = "item 20 (openness)"},
+		"bfi_o_25" 	= {dict$description[i] = "item 25 (openness)"},
+		"bfi_o_30" 	= {dict$description[i] = "item 30 (openness)"},
+		"bfi_o_35r" = {dict$description[i] = "item 35 (openness), reverse coded"},
+		"bfi_o_40" 	= {dict$description[i] = "item 40 (openness)"},
+		"bfi_o_41r" = {dict$description[i] = "item 41 (openness), reverse coded"},
+		"bfi_o_44" 	= {dict$description[i] = "item 44 (openness)"},
+		"bfi_e" = {
+			dict$description[i] = "domain score for extraversion, calulated as mean across items"
+			dict$value_range[i] = "1 to 5"
+		},
+		"bfi_a" = {
+			dict$description[i] = "domain score for agreeableness, calulated as mean across items"
+			dict$value_range[i] = "1 to 5"
+		},
+		"bfi_c" = {
+			dict$description[i] = "domain score for conscientiousness, calulated as mean across items"
+			dict$value_range[i] = "1 to 5"
+		},
+		"bfi_n" = {
+			dict$description[i] = "domain score for neuroticism, calulated as mean across items"
+			dict$value_range[i] = "1 to 5"
+		},
+		"bfi_o" = {
+			dict$description[i] = "domain score for openness, calulated as mean across items"
+			dict$value_range[i] = "1 to 5"
+		},
+		
+		# BFAS
+		
+		"bfas_i_15r" = {dict$description[i] = "item 15 (intellect), reverse coded"},
+		"bfas_i_35"  = {dict$description[i] = "item 35 (intellect)"},
+		"bfas_i_45r" = {dict$description[i] = "item 45 (intellect), reverse coded"},
+		"bfas_i_5"   = {dict$description[i] = "item 5 (intellect)"},
+		"bfas_i_55r" = {dict$description[i] = "item 55 (intellect), reverse coded"},
+		"bfas_i_65"  = {dict$description[i] = "item 65 (intellect)"},
+		"bfas_i_75"  = {dict$description[i] = "item 75 (intellect)"},
+		"bfas_i_85r" = {dict$description[i] = "item 85 (intellect), reverse coded"},
+		"bfas_i_95"  = {dict$description[i] = "item 95 (intellect)"},
+		"bfas_o_10"  = {dict$description[i] = "item 10 (openess)"},
+		"bfas_o_100" = {dict$description[i] = "item 100 (openess)"},
+		"bfas_o_20"  = {dict$description[i] = "item 20 (openess)"},
+		"bfas_o_30"  = {dict$description[i] = "item 30 (openess)"},
+		"bfas_o_40"  = {dict$description[i] = "item 40 (openess)"},
+		"bfas_o_50r" = {dict$description[i] = "item 50 (openess), reverse coded"},
+		"bfas_o_60r" = {dict$description[i] = "item 60 (openess), reverse coded"},
+		"bfas_o_70"  = {dict$description[i] = "item 70 (openess)"},
+		"bfas_o_80r" = {dict$description[i] = "item 10 (openess), reverse coded"},
+		"bfas_o_90r" = {dict$description[i] = "item 90 (openess), reverse coded"},
+		"bfas_oi" = {
+		  dict$description[i] = "domain score for openness/intellect, calculated as mean across items"
+		  dict$value_range[i] = "1 to 5"
+		},
+		
+		# PHQ
+		
+		"phq_1" = {dict$description[i] = "item 1"},
+		"phq_2" = {dict$description[i] = "item 2"},
+		"phq_3" = {dict$description[i] = "item 3"},
+		"phq_4" = {dict$description[i] = "item 4"},
+		"phq_5" = {dict$description[i] = "item 5"},
+		"phq_6" = {dict$description[i] = "item 6"},
+		"phq_7" = {dict$description[i] = "item 7"},
+		"phq_8" = {dict$description[i] = "item 8"},
+		"phq_9" = {dict$description[i] = "item 9"},
+		"phq_function" = {
+		  dict$description[i] = 
+		    "if any PHQ items were endorsed, how difficult those problems made everyday function"
+		  dict$value_range[i] = 
+		    "Likert scale from 1 (not difficult at all) to 4 (extremely difficult)"
+		},
+		"phq_total" = {dict$description[i] = "total score on PHQ, calculated as sum across items"}
+  )
+}
+
+# save dictionary as csv file
+# write.csv(dict, paste0(date, "-demo-clean-dict.csv"), row.names = FALSE)
+```
