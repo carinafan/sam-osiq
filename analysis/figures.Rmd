@@ -1,0 +1,336 @@
+---
+title: "Figures"
+author: "Carina Fan" 
+date: "| Last updated: `r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  github_document:
+    toc: true
+---
+
+# Set up
+
+This script uses the same workspace that is created by the main analysis script.
+
+```{r}
+load("analysis_workspace.RData")
+```
+
+```{r packages}
+suppressPackageStartupMessages({
+  library(corrplot)
+  library(ExPosition)
+  library(gplots)
+  library(gridExtra)
+  library(lmSupport)
+  library(psych)
+  library(PTCA4CATA)
+  library(readxl)
+  library(reshape)
+  library(TInPosition)
+  library(wrapr)
+  library(magrittr)
+  library(tidyverse)})
+```
+
+```{r functions}
+# function to create shared legend across multiple ggplots
+# from http://rpubs.com/sjackman/grid_arrange_shared_legend
+
+grid_arrange_shared_legend <- function(...) {
+  plots <- list(...)
+  g <- ggplotGrob(plots[[1]] + theme(legend.position="bottom"))$grobs
+  legend <- g[[which(sapply(g, function(x) x$name) == "guide-box")]]
+  lheight <- sum(legend$height)
+  grid.arrange(
+    do.call(arrangeGrob, lapply(plots, function(x)
+      x + theme(legend.position="none"))),
+    legend,
+    ncol = 1,
+    heights = grid::unit.c(unit(1, "npc") - lheight, lheight))
+}
+```
+
+
+<!-- ======================================================================= -->
+
+
+# figure 1: scree plot and dim 1 vs 2 for PCA on SAM
+
+```{r}
+# scree plot
+
+# tiff("figures/sam_scree.tiff", width = 6, height = 4, units = "in", res = 600)
+
+PTCA4CATA::PlotScree(
+  ev = pca.sam$ExPosition.Data$pdq$tau,
+  max.ev = max(pca.sam$ExPosition.Data$eig)
+) +
+  coord_fixed(ratio = .5)
+
+# dev.off()
+
+# set up for PCA plots
+
+Fj.sam = pca.sam$ExPosition.Data$fj
+
+map_labels = createxyLabels.gen(
+  x_axis = 1, y_axis = 2,
+  lambda = pca.sam$ExPosition.Data$eigs,
+  tau = pca.sam$ExPosition.Data$t)
+
+jmap.sam = PTCA4CATA::createFactorMap(
+  Fj.sam,
+  col.points = colour.sam,
+  col.labels = colour.sam,
+  alpha.points. = .3,
+  text.cex = 3)
+
+jaggmap.sam =
+  jmap.sam$zeMap_background +
+  jmap.sam$zeMap_dots +
+  jmap.sam$zeMap_text +
+  coord_fixed(ratio = 1.2) +
+  map_labels
+
+Fi.sam = pca.sam$ExPosition.Data$fi
+
+imap.sam = PTCA4CATA::createFactorMap(
+  Fi.sam,
+  display.labels = FALSE,
+  alpha.points = .3,
+  cex = .3,
+  text.cex = 3)
+
+iaggmap.sam =
+  imap.sam$zeMap_background +
+  imap.sam$zeMap_dots +
+  coord_equal(ratio = .8)
+
+# PCA plot of variables
+
+# tiff("figures/sam_pca_dim1v2.tiff", width = 3, height = 4, units = "in", res = 600)
+
+print(jaggmap.sam)
+
+# dev.off()
+
+# PCA plot of subjects 
+
+# tiff("figures/sam_pca_dim1v2_subjects.tiff", width = 3, height = 2, units = "in", res = 600)
+
+print(iaggmap.sam)
+
+# dev.off()
+```
+
+<!-- ======================================================================= -->
+
+
+# figure 2: univariate relationships between SAM and OSIQ
+
+```{r}
+scatter_samE_osiq =   
+  df.sam.osiq %>%
+  select(sam_epi_raw, osiq_mini_o, osiq_mini_s) %>%
+  melt(id = "sam_epi_raw", measured = c("osiq_mini_o", "osiq_mini_s")) %>% 
+  ggplot(aes(x = value, y = sam_epi_raw, colour = variable)) +
+  geom_point(alpha = .1, position = "jitter") +
+  geom_smooth(method = "lm", size = 2) +
+  theme_bw() +
+  labs(x = "OSIQ score", y = "SAM-episodic score") +
+  scale_colour_manual(name = "OSIQ domain", 
+                      values = colourCode.osiq,
+                      labels = c("OSIQ-object", "OSIQ-spatial"))
+
+scatter_samS_osiq =   
+  df.sam.osiq %>%
+  select(sam_spa_raw, osiq_mini_o, osiq_mini_s) %>%
+  melt(id = "sam_spa_raw", measured = c("osiq_mini_o", "osiq_mini_s")) %>% 
+  ggplot(aes(x = value, y = sam_spa_raw, colour = variable)) +
+  geom_point(alpha = .1, position = "jitter") +
+  geom_smooth(method = "lm", size = 2) +
+  theme_bw() +
+  labs(x = "OSIQ score", y = "SAM-spatial score") +
+  scale_colour_manual(name = "OSIQ domain", 
+                      values = colourCode.osiq,
+                      labels = c("OSIQ-object", "OSIQ-spatial"))
+
+scatter_samF_osiq =   
+  df.sam.osiq %>%
+  select(sam_fut_raw, osiq_mini_o, osiq_mini_s) %>%
+  melt(id = "sam_fut_raw", measured = c("osiq_mini_o", "osiq_mini_s")) %>% 
+  ggplot(aes(x = value, y = sam_fut_raw, colour = variable)) +
+  geom_point(alpha = .1, position = "jitter") +
+  geom_smooth(method = "lm", size = 2) +
+  theme_bw() +
+  labs(x = "OSIQ score", y = "SAM-future score") +
+  scale_colour_manual(name = "OSIQ domain",
+                      values = colourCode.osiq,
+                      labels = c("OSIQ-object", "OSIQ-spatial"))
+
+scatter_samM_osiq =
+  df.sam.osiq %>%
+  select(sam_sem_raw, osiq_mini_o, osiq_mini_s) %>%
+  melt(id = "sam_sem_raw", measured = c("osiq_mini_o", "osiq_mini_s")) %>% 
+  ggplot(aes(x = value, y = sam_sem_raw, colour = variable)) +
+  geom_point(alpha = .1, position = "jitter") +
+  geom_smooth(method = "lm", size = 2) +
+  theme_bw() +
+  labs(x = "OSIQ score", y = "SAM-semantic score") +
+  scale_colour_manual(name = "OSIQ domain",
+                      values = colourCode.osiq,
+                      labels = c("OSIQ-object", "OSIQ-spatial"))
+
+# png("figures/sam_osiq_scatter.png", width = 10, height = 10, units = "in", res = 300)
+
+grid_arrange_shared_legend(scatter_samE_osiq, scatter_samS_osiq, 
+                           scatter_samF_osiq, scatter_samM_osiq)
+
+# dev.off()
+```
+
+
+<!-- ======================================================================= -->
+
+
+# figure 3: PLSC on SAM and OSIQ
+
+```{r}
+# scree plot
+
+# png("figures/sam_osiq_scree.png", width = 5, height = 5, units = "in", res = 600)
+
+PTCA4CATA::PlotScree(
+  ev = plsc.sam.osiq$TExPosition.Data$eigs,
+  max.ev = max(plsc.sam.osiq$TExPosition.Data$eigs)
+)
+
+# dev.off()
+
+# variable plot
+
+loadings = rbind(plsc.sam.osiq$TExPosition.Data$fi,
+                 plsc.sam.osiq$TExPosition.Data$fj)
+
+colnames(loadings) = paste0("Dimension ", 1:ncol(loadings))
+
+colour.plsc = c(colour.osiq, colour.sam)
+
+map.loadings = PTCA4CATA::createFactorMap(
+  loadings,
+  col.points = colour.plsc,
+  alpha.points = .2,
+  cex = 2,
+  col.labels = colour.plsc)
+
+map_labels = createxyLabels.gen(
+  x_axis = 1, y_axis = 2,
+  lambda = plsc.sam.osiq$TExPosition.Data$eigs,
+  tau = plsc.sam.osiq$TExPosition.Data$t)
+
+aggmap.loadings =
+  map.loadings$zeMap_background +
+  map.loadings$zeMap_text +
+  map.loadings$zeMap_dots +
+  map_labels
+
+# png("figures/sam_osiq_plsc.png", width = 6, height = 4, units = "in", res = 300)
+
+print(aggmap.loadings)
+
+# dev.off()
+```
+
+
+<!-- ======================================================================= -->
+
+
+# figure 4: contributions to PLSC LVs
+
+```{r}
+# LV1 OSIQ
+
+Fi = plsc.sam.osiq$TExPosition.Data$fi
+
+contrib.i = plsc.sam.osiq$TExPosition.Data$ci
+
+contrib.i.signed = contrib.i* sign(Fi)
+
+# png("figures/plsc_osiq_lv1.png", width = 5, height = 3, units = "in", res = 600)
+
+PrettyBarPlot2(
+  bootratio = round(100 * contrib.i.signed[,1]),
+  threshold = 100/ nrow(contrib.i.signed),
+  ylim = NULL,
+  color4bar = gplots::col2hex(colour.osiq),
+  color4ns = "gray75",
+  plotnames = TRUE,
+  main = "Important Contributions to LV1 from OSIQ items",
+  ylab = "Signed Contributions")
+
+# dev.off()
+
+# LV1 SAM
+
+Fj = plsc.sam.osiq$TExPosition.Data$fj
+
+contrib.j = plsc.sam.osiq$TExPosition.Data$cj
+
+contrib.j.signed = contrib.j * sign(Fj)
+
+# png("figures/plsc_sam_lv1.png", width = 5, height = 3, units = "in", res = 600)
+
+PrettyBarPlot2(
+  bootratio = round(100 * contrib.j.signed[,1]),
+  threshold = 100/ nrow(contrib.j.signed),
+  ylim = NULL,
+  color4bar = gplots::col2hex(colour.sam),
+  color4ns = "gray75",
+  plotnames = TRUE,
+  main = "Important Contributions to LV1 from SAM items",
+  ylab = "Signed Contributions")
+
+# dev.off()
+
+# LV2 OSIQ
+
+# png("figures/plsc_osiq_lv2.png", width = 5, height = 3, units = "in", res = 600)
+
+PrettyBarPlot2(
+  bootratio = round(100 * contrib.i.signed[,2]),
+  threshold = 100/ nrow(contrib.i.signed),
+  ylim = NULL,
+  color4bar = gplots::col2hex(colour.osiq),
+  color4ns = "gray75",
+  plotnames = TRUE,
+  main = "Important Contributions to LV2 from OSIQ items",
+  ylab = "Signed Contributions")
+
+# dev.off()
+
+# LV2 SAM
+
+# png("figures/plsc_sam_lv2.png", width = 5, height = 3, units = "in", res = 600)
+
+PrettyBarPlot2(
+  bootratio = round(100 * contrib.j.signed[,2]),
+  threshold = 100/ nrow(contrib.j.signed),
+  ylim = NULL,
+  color4bar = gplots::col2hex(colour.sam),
+  color4ns = "gray75",
+  plotnames = TRUE,
+  main = "Important Contributions to LV2 from SAM items",
+  ylab = "Signed Contributions")
+
+# dev.off()
+```
+
+
+<!-- ======================================================================= -->
+
+
+# Session info
+
+```{r session_info, include = TRUE}
+sessionInfo()
+```

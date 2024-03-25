@@ -742,7 +742,18 @@ plsc.sam.phq = tepPLS(
 plsc.sam.phq$TExPosition.Data$t
 ```
 
+
 <!-- ======================================================================= -->
+
+
+# Export workspace
+
+```{r export_workspace}
+save.image("analysis_workspace.RData")
+```
+
+<!-- ======================================================================= -->
+
 
 # Session info
 
