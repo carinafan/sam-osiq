@@ -1,0 +1,751 @@
+---
+title: "On the relationship between episodic autobiographical memory and spatial navigation"
+subtitle: "Analysis script"
+author: "Carina Fan, Hervé Abdi, & Brian Levine"
+date: "Last updated: `r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  github_document:
+    toc: true
+---
+
+This file contains the code and output from all the analyses reported in the main text and supplemental materials of the manuscript.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+# Set up
+
+```{r packages}
+# load packages
+library(corrplot)
+library(ExPosition)
+library(gplots)
+library(gridExtra)
+library(lmSupport)
+library(psych)
+# devtools::install_github("https://github.com/HerveAbdi/PTCA4CATA")
+library(PTCA4CATA)
+library(readxl)
+library(reshape)
+library(TInPosition)
+library(wrapr)
+library(magrittr)
+library(tidyverse)
+```
+
+```{r colours}
+# colour codes for plots 
+colourCodeicor = colorRampPalette(c("blue", "yellow", "red"))(n = 299)
+colourCode.sam = c("deepskyblue", "darkolivegreen", "firebrick3", "darkorchid3")
+colourCode.osiq = c("darkgoldenrod", "slateblue")
+colourCode.bfi = c("orange1", "lightsalmon1", "navajowhite3", "gold1", "peachpuff3")
+```
+
+```{r load_data}
+# load data
+df.raw = read.csv("../../data/old/2019-10-03-demo-raw.csv")
+df.clean = read.csv("../../data/old/2019-10-03-demo-clean.csv", na.strings = "")
+
+# number of responses recorded
+nrow(df.raw)
+
+# number of responses after preliminary cleaning
+nrow(df.clean)
+```
+
+## Exclusions
+
+```{r exclusions}
+# names of health variables to exclude based on
+neuroNames = df.clean %>% 
+  select(starts_with("health_")) %>% 
+  select(-c("health_other", "health_other_text")) %>% 
+  names()
+
+# number of participants endorsing each condition
+df.neuro = df.clean %>% select(neuroNames)
+df.neuro %<>% mutate_all(as.character)
+sapply(df.neuro, function(x) sum(str_count(x, "Yes"), na.rm = TRUE))
+
+# column indices of variables to exclude 
+neuroIndices = which(names(df.clean) %in% neuroNames)
+
+# initialize vector of subjects with neuro conditions 
+neuroSubjects = vector(mode = "character")
+
+## if subject responded Yes to any neuro condition, 
+## add their row number to neuroSubject
+for (row in 1:nrow(df.clean)) {
+  for (col in 1:length(neuroIndices)) {
+    if (is.na(df.clean[row, neuroIndices[col]])) {
+      next
+    }
+   else if (df.clean[row, neuroIndices[col]] == "Yes") {
+      neuroSubjects = append(neuroSubjects, row)
+    }
+  }
+}
+
+# number of subjects to exclude based on neurological history
+length(unique(neuroSubjects)) 
+
+# number of subjects to exclude based on PHQ (scores >= 20)
+df.clean$phq_total %<>% as.character() %>% as.numeric()
+
+df.clean %>%
+  filter(phq_total >= 20) %>%
+  nrow()
+
+# exclude subjects based on health conditions
+df = df.clean %>% filter(!row_number() %in% neuroSubjects) 
+
+# exclude subjects based on PHQ
+df %<>% filter(phq_total < 20)
+
+# number of participants after all exclusions
+nrow(df)
+```
+
+<!-- ======================================================================= -->
+
+# Demographics
+
+Age and education:
+
+```{r age_edu}
+df %>% 
+  summarise(age_mean = mean(age),
+            age_sd = sd(age),
+            edu_mean = mean(edu),
+            edu_sd = sd(edu))
+
+# age range
+range(df$age)
+```
+
+Gender:
+
+```{r gender}
+df %>% 
+  group_by(gender) %>% 
+  summarise(n = n())
+```
+
+<!-- ======================================================================= -->
+
+# Factor structure of the Survey of Autobiographical Memory (SAM)
+
+```{r setup_sam}
+# select SAM items
+df.sam = df %>%
+  select(gender, starts_with("sam")) %>%
+  select(-c("sam_epi", "sam_sem", "sam_spa", "sam_fut"))
+
+# rename variables
+names(df.sam) = c(
+  "gender",
+  paste0("E", seq(1, 8)),
+  paste0("F", seq(1, 6)),
+  paste0("M", seq(1, 6)),
+  paste0("S", seq(1, 6))
+)
+
+# split dataframe by gender for supplemental analyses
+df.sam.female = df.sam %>% filter(gender == "Female")
+df.sam.male   = df.sam %>% filter(gender == "Male")
+
+# remove gender column from dataframes
+df.sam$gender        = NULL
+df.sam.female$gender = NULL
+df.sam.male$gender   = NULL
+
+# assign colours to variables
+colour.sam = as.vector(rep("", ncol(df.sam)))
+
+for (i in 1:ncol(df.sam)) {
+  switch(substr(names(df.sam)[i], 1, 1),
+         E = {colour.sam[i] = colourCode.sam[1]},
+         F = {colour.sam[i] = colourCode.sam[2]},
+         M = {colour.sam[i] = colourCode.sam[3]},
+         S = {colour.sam[i] = colourCode.sam[4]})
+}
+
+# convert to numeric
+df.sam %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+df.sam.female %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+df.sam.male %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+```
+
+```{r pca_sam}
+pca.sam = epPCA(
+  df.sam,
+  scale = FALSE,
+  center = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+pca.sam$ExPosition.Data$t
+```
+
+<!-- ======================================================================= -->
+
+# Relationship between SAM and Object-Spatial Imagery Questionnaire (OSIQ)
+
+## Univariate analysis (linear regression)
+
+```{r setup_sam_osiq}
+# select SAM and OSIQ items
+df.sam.osiq = df %>%
+  select(starts_with("sam"),
+         osiq_s_1, osiq_s_9, osiq_s_13, osiq_s_14, osiq_s_18, osiq_s_27r, osiq_s_29,
+         osiq_o_4, osiq_o_12, osiq_o_17, osiq_o_22, osiq_o_25, osiq_o_28, osiq_o_30)
+
+## convert to numeric
+df.sam.osiq %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+
+# calculate OSIQ domain scores based on mini OSIQ items
+
+## object
+df.sam.osiq$osiq_mini_o =
+  df.sam.osiq %>%
+  select(starts_with("osiq_o")) %>%
+  rowMeans()
+
+## spatial
+df.sam.osiq$osiq_mini_s =
+  df.sam.osiq %>%
+  select(starts_with("osiq_s")) %>%
+  rowMeans()
+
+# calculate SAM domain scores based on raw item scores
+
+## episodic
+df.sam.osiq$sam_epi_raw = df.sam.osiq %>%
+  select(starts_with("sam_event")) %>%
+  rowMeans()
+
+## spatial
+df.sam.osiq$sam_spa_raw = df.sam.osiq %>%
+  select(starts_with("sam_spatial")) %>%
+  rowMeans()
+
+## semantic
+df.sam.osiq$sam_sem_raw = df.sam.osiq %>%
+  select(starts_with("sam_semantic")) %>%
+  rowMeans()
+
+## future
+df.sam.osiq$sam_fut_raw = df.sam.osiq %>%
+  select(starts_with("sam_future")) %>%
+  rowMeans()
+```
+
+```{r regression_sam_osiq}
+# SAM-episodic
+model_samE_osiq = lm(sam_epi_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq)
+model_samE_osiq %>% summary()
+model_samE_osiq %>% modelEffectSizes()
+
+# SAM-spatial
+model_samS_osiq = lm(sam_spa_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq)
+model_samS_osiq %>% summary()
+model_samS_osiq %>% modelEffectSizes()
+
+# SAM-future
+model_samF_osiq = lm(sam_fut_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq)
+model_samF_osiq %>% summary()
+model_samF_osiq %>% modelEffectSizes()
+
+# SAM-semantic
+model_samM_osiq = lm(sam_sem_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq)
+model_samM_osiq %>% summary()
+model_samM_osiq %>% modelEffectSizes()
+```
+
+## Multivariate analysis (partial least squares correlation)
+
+```{r setup_osiq}
+# select mini OSIQ items
+df.osiq = df %>%
+  select(osiq_s_1, osiq_s_9, osiq_s_13, osiq_s_14, osiq_s_18, osiq_s_27r, osiq_s_29,
+         osiq_o_4, osiq_o_12, osiq_o_17, osiq_o_22, osiq_o_25, osiq_o_28, osiq_o_30)
+
+## convert to numeric
+df.osiq %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+
+# rename variables
+names(df.osiq) = c(
+  "s1", "s9", "s13", "s14", "s18", "s27", "s29",
+  "o4", "o12", "o17", "o22", "o25", "o28", "o30"
+)
+
+# assign colours to variables
+colour.osiq = as.vector(rep("", ncol(df.osiq)))
+
+for(i in 1:ncol(df.osiq)) {
+  switch(substr(names(df.osiq)[i], 1, 1),
+         "o" = {colour.osiq[i] = colourCode.osiq[1]},
+         "s" = {colour.osiq[i] = colourCode.osiq[2]})
+}
+```
+
+```{r plsc_sam_osiq}
+plsc.sam.osiq = tepPLS(
+  DATA1 = df.osiq,
+  DATA2 = df.sam,
+  center1 = TRUE, scale1 = FALSE,
+  center2 = TRUE, scale2 = FALSE,
+  make_design_nominal = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+plsc.sam.osiq$TExPosition.Data$t
+```
+
+<!-- ======================================================================= -->
+
+# Supplemental analyses
+
+## Factor structure of the SAM in two independent samples
+
+### 2013 dataset
+
+```{r setup_sam_og}
+# load SAM data from independent sample
+df.og = read_excel("../../../../damp/SAMOriginalData_FinalSampleNof598.xls")
+
+# select SAM items
+df.og.sam = df.og[ , which(colnames(df.og) == 'E1') : which(colnames(df.og) == 'Sp20')]
+
+# IDs and n for subtables
+domainNames = wrapr::qc(Episodic, Future, Semantic, Spatial) 
+domainNamesVar = wrapr::qc(Episodic, Future, Semantic, sPatial) 
+posUp = sapply(strsplit(domainNamesVar, ''), function(a) which(a %in% LETTERS)[1])
+domainKeys = substr(domainNamesVar, posUp, posUp)
+domainNs = c(42, 16, 24, 20)
+domains = data.frame(domainNames, domainNamesVar, domainKeys, domainNs, colourCode.sam,
+                     row.names = domainNames,
+                     stringsAsFactors = FALSE)
+
+# rename variables
+colnames(df.og.sam) = paste0(rep(domains$domainKeys, domains$domainNs),
+                             unlist(sapply(domains$domainNs,function(x){1:x})))
+
+# keep only items from final published questionnaire
+keepSEpisodic = c(9, 10, 13, 21, 28, 35, 37, 39)
+keepSFuture = c(1, 3, 5, 7, 2, 15)
+keepSSemantic = c(4, 5, 11, 12, 13, 22)
+keepSSpatial = c(7, 3, 5, 1, 12, 17)
+keepMini = c(keepSEpisodic, 
+             42 + keepSFuture, 
+             42 + 16 + keepSSemantic, 
+             42 + 16 + 24 + keepSSpatial)
+df.og.sam = df.og.sam[ , keepMini]
+
+# rename variables
+names(df.og.sam) = c(
+  paste0("E", seq(1, 8)),
+  paste0("F", seq(1, 6)),
+  paste0("M", seq(1, 6)),
+  paste0("S", seq(1, 6))
+)
+```
+
+```{r pca_sam_og}
+pca.sam.og = epPCA(
+  df.og.sam,
+  scale = FALSE,
+  center = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+pca.sam.og$ExPosition.Data$t
+```
+
+### 2019 dataset
+
+```{r demographics_et}
+# load SAM data from independent sample
+df.et = read.csv("../../../baytourET/data/baytourET_samscreen/2020-06-23-baytourET-samscreen-clean.csv")
+
+# number of participants
+nrow(df.et)
+
+# age 
+mean(df.et$age)
+sd(df.et$age)
+range(df.et$age)
+
+# education
+mean(df.et$edu)
+sd(df.et$edu)
+range(df.et$edu)
+
+# gender
+df.et %>% 
+  group_by(gender) %>% 
+  summarise(n  = n())
+```
+
+```{r setup_sam_et}
+# select SAM items
+df.sam.et = df.et %>% 
+  select(starts_with("sam"), -c(sam_epi, sam_sem, sam_spa, sam_fut))
+
+# rename variables
+names(df.sam.et) = c(
+  paste0("E", seq(1, 8)),
+  paste0("F", seq(1, 6)),
+  paste0("M", seq(1, 6)),
+  paste0("S", seq(1, 6))
+)
+```
+
+```{r pca_sam_et}
+pca.sam.et = epPCA(
+  df.sam.et,
+  scale = FALSE,
+  center = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+pca.sam.et$ExPosition.Data$t
+```
+
+## Relationship betwen SAM and OSIQ
+
+### Replication in an independent sample (2019 dataset)
+
+#### Univariate analysis (linear regression)
+
+```{r setup_sam_osiq_et}
+# select SAM and OSIQ items
+df.sam.osiq.et = df.et %>%
+  select(starts_with("sam"),
+         osiq_s_1, osiq_s_9, osiq_s_13, osiq_s_14, osiq_s_18, osiq_s_27r, osiq_s_29,
+         osiq_o_4, osiq_o_12, osiq_o_17, osiq_o_22, osiq_o_25, osiq_o_28, osiq_o_30)
+
+## convert to numeric
+df.sam.osiq.et %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+
+# calculate OSIQ domain scores based on mini OSIQ items
+
+## object
+df.sam.osiq.et$osiq_mini_o =
+  df.sam.osiq.et %>%
+  select(starts_with("osiq_o")) %>%
+  rowMeans()
+
+## spatial
+df.sam.osiq.et$osiq_mini_s =
+  df.sam.osiq.et %>%
+  select(starts_with("osiq_s")) %>%
+  rowMeans()
+
+# calculate SAM domain scores based on raw item scores
+
+## episodic
+df.sam.osiq.et$sam_epi_raw = df.sam.osiq.et %>%
+  select(starts_with("sam_event")) %>%
+  rowMeans()
+
+## spatial
+df.sam.osiq.et$sam_spa_raw = df.sam.osiq.et %>%
+  select(starts_with("sam_spatial")) %>%
+  rowMeans()
+
+## semantic
+df.sam.osiq.et$sam_sem_raw = df.sam.osiq.et %>%
+  select(starts_with("sam_semantic")) %>%
+  rowMeans()
+
+## future
+df.sam.osiq.et$sam_fut_raw = df.sam.osiq.et %>%
+  select(starts_with("sam_future")) %>%
+  rowMeans()
+```
+
+```{r regression_sam_osiq.et}
+# SAM-episodic
+model_samE_osiq.et = lm(sam_epi_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq.et)
+model_samE_osiq.et %>% summary()
+model_samE_osiq.et %>% modelEffectSizes()
+
+# SAM-spatial
+model_samS_osiq.et = lm(sam_spa_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq.et)
+model_samS_osiq.et %>% summary()
+model_samS_osiq.et %>% modelEffectSizes()
+
+# SAM-future
+model_samF_osiq.et = lm(sam_fut_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq.et)
+model_samF_osiq.et %>% summary()
+model_samF_osiq.et %>% modelEffectSizes()
+
+# SAM-semantic
+model_samM_osiq.et = lm(sam_sem_raw ~ osiq_mini_o + osiq_mini_s, data = df.sam.osiq.et)
+model_samM_osiq.et %>% summary()
+model_samM_osiq.et %>% modelEffectSizes()
+```
+
+#### Multivariate analysis (partial least squares correlation)
+
+```{r setup_osiq_et}
+# select mini OSIQ items
+df.osiq.et = df.et %>%
+  select(osiq_s_1, osiq_s_9, osiq_s_13, osiq_s_14, osiq_s_18, osiq_s_27r, osiq_s_29,
+         osiq_o_4, osiq_o_12, osiq_o_17, osiq_o_22, osiq_o_25, osiq_o_28, osiq_o_30)
+
+## convert to numeric
+df.osiq.et %<>%
+  mutate_all(as.character) %>%
+  mutate_all(as.numeric)
+
+# rename variables
+names(df.osiq.et) = c(
+  "s1", "s9", "s13", "s14", "s18", "s27", "s29",
+  "o4", "o12", "o17", "o22", "o25", "o28", "o30"
+)
+```
+
+```{r plsc_sam_osiq_et}
+plsc.sam.osiq.et = tepPLS(
+  DATA1 = df.osiq.et,
+  DATA2 = df.sam.et,
+  center1 = TRUE, scale1 = FALSE,
+  center2 = TRUE, scale2 = FALSE,
+  make_design_nominal = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+plsc.sam.osiq.et$TExPosition.Data$t
+```
+
+## Gender differences
+
+```{r pca_sam_female}
+pca.sam.female = epPCA(
+  df.sam.female,
+  scale = FALSE,
+  center = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+pca.sam.female$ExPosition.Data$t
+```
+
+```{r pca_sam_male}
+pca.sam.male = epPCA(
+  df.sam.male,
+  scale = FALSE,
+  center = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+pca.sam.male$ExPosition.Data$t
+```
+
+```{r regression_sam_osiq_gender}
+# set up data
+df.sam.osiq.gender = cbind(df$gender, df.sam.osiq)
+names(df.sam.osiq.gender)[1] = "gender"
+df.sam.osiq.gender %<>% filter(gender != "Prefer not to answer")
+
+# SAM-episodic
+model_samE_osiq_gender = 
+  lm(sam_epi_raw ~ gender * (osiq_mini_o + osiq_mini_s), data = df.sam.osiq.gender)
+summary(model_samE_osiq_gender)$adj.r.squared
+model_samE_osiq_gender %>% car::Anova(type = 3)
+model_samE_osiq_gender %>% modelEffectSizes()
+
+# SAM-spatial
+model_samS_osiq_gender = 
+  lm(sam_spa_raw ~ gender * (osiq_mini_o + osiq_mini_s), data = df.sam.osiq.gender)
+summary(model_samS_osiq_gender)$adj.r.squared
+model_samS_osiq_gender %>% car::Anova(type = 3)
+model_samS_osiq_gender %>% modelEffectSizes()
+
+# SAM-future
+model_samF_osiq_gender = 
+  lm(sam_fut_raw ~ gender * (osiq_mini_o + osiq_mini_s), data = df.sam.osiq.gender)
+summary(model_samF_osiq_gender)$adj.r.squared
+model_samF_osiq_gender %>% car::Anova(type = 3)
+model_samF_osiq_gender %>% modelEffectSizes()
+
+# SAM-semantic
+model_samM_osiq_gender = 
+  lm(sam_sem_raw ~ gender * (osiq_mini_o + osiq_mini_s), data = df.sam.osiq.gender)
+summary(model_samM_osiq_gender)$adj.r.squared
+model_samM_osiq_gender %>% car::Anova(type = 3)
+model_samM_osiq_gender %>% modelEffectSizes()
+```
+
+## Personality effects
+
+### Regressions of OSIQ on SAM
+
+```{r calculate_halo}
+# select items to analyze with halo
+df.halo = df %>% 
+  select(starts_with("phq"),
+         starts_with("bfi"))
+
+# change items from factor to numeric
+df.halo %<>%
+  mutate_all(as.character) %>% 
+  mutate_all(as.numeric)
+
+# add OSIQ and SAM scores to halo dataframe
+df.halo = cbind(df.halo, df.sam.osiq)
+
+# standardize BFI domain scores
+df.halo %<>% 
+  mutate_at(.vars = c("bfi_e", "bfi_a", "bfi_c", "bfi_n", "bfi_o"),
+            scale)
+
+# calculate halo scores
+df.halo$halo = 
+  ((df.halo$bfi_a + 
+    df.halo$bfi_c + 
+    df.halo$bfi_o + 
+    df.halo$bfi_e) / 4) -
+  df.halo$bfi_n
+```
+
+```{r halo_osiq_sam}
+# episodic
+model_samE_osiq_halo =
+  lm(sam_epi_raw ~ halo + osiq_mini_o + osiq_mini_s, data = df.halo)
+summary(model_samE_osiq_halo)
+modelEffectSizes(model_samE_osiq_halo)
+
+# spatial
+model_samS_osiq_halo =
+  lm(sam_spa_raw ~ halo + osiq_mini_o + osiq_mini_s, data = df.halo)
+summary(model_samS_osiq_halo)
+modelEffectSizes(model_samS_osiq_halo)
+
+# semantic
+model_samM_osiq_halo =
+  lm(sam_sem_raw ~ halo + osiq_mini_o + osiq_mini_s, data = df.halo)
+summary(model_samM_osiq_halo)
+modelEffectSizes(model_samM_osiq_halo)
+
+# future
+model_samF_osiq_halo =
+  lm(sam_fut_raw ~ halo + osiq_mini_o + osiq_mini_s, data = df.halo)
+summary(model_samF_osiq_halo)
+modelEffectSizes(model_samF_osiq_halo)
+```
+
+### BFI and SAM
+
+```{r setup_bfi}
+# select BFI items
+df.bfi = df %>% 
+  select(starts_with("bfi")) %>% 
+  select(-c("bfi_e", "bfi_a", "bfi_c", "bfi_n", "bfi_o"))
+
+# convert to numeric
+df.bfi %<>% 
+  mutate_all(as.character) %>% 
+  mutate_all(as.numeric)
+
+# rename variables
+for (i in 1:length(names(df.bfi))) {
+  
+  # remove "bfi_" from beginning of column names
+  names(df.bfi)[i] %<>% substr(5, nchar(names(df.bfi)[i]))
+  
+  # remove "r" from end of reverse coded items 
+  if (substr(names(df.bfi)[i], 
+             nchar(names(df.bfi)[i]), 
+             nchar(names(df.bfi)[i])) == "r") {
+    names(df.bfi)[i] %<>% substr(1, nchar(names(df.bfi)[i])-1)
+  }
+  
+  # remove underscore
+  names(df.bfi)[i] = gsub(pattern = "_", replacement = "", x = names(df.bfi)[i])
+  
+}
+
+# assign colours to variables
+colour.bfi = as.vector(rep("", ncol(df.bfi)))
+
+for (i in 1:ncol(df.bfi)) {
+  switch(substr(names(df.bfi)[i], 1, 1),
+         a = {colour.bfi[i] = colourCode.bfi[1]},
+         c = {colour.bfi[i] = colourCode.bfi[2]},
+         e = {colour.bfi[i] = colourCode.bfi[3]},
+         n = {colour.bfi[i] = colourCode.bfi[4]},
+         o = {colour.bfi[i] = colourCode.bfi[5]})
+}
+```
+
+```{r plsc_sam_bfi}
+plsc.sam.bfi = tepPLS(
+  DATA1 = df.sam, 
+  DATA2 = df.bfi,
+  center1 = TRUE, scale1 = FALSE,
+  center2 = TRUE, scale2 = FALSE,
+  make_design_nominal = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+plsc.sam.bfi$TExPosition.Data$t
+```
+
+## Depression effects
+
+```{r setup_phq}
+# select PHQ items
+df.phq = df %>% 
+  select(starts_with("phq")) %>% 
+  select(-c("phq_function", "phq_total"))
+
+# convert to numeric
+df.phq %<>% 
+  mutate_all(as.character) %>% 
+  mutate_all(as.numeric)
+
+# rename variables
+for (i in 1:length(names(df.phq))) {
+  
+  # remove underscore
+  names(df.phq)[i] = gsub(pattern = "_", replacement = "", x = names(df.phq)[i])
+  
+}
+```
+
+```{r plsc_sam_phq}
+plsc.sam.phq = tepPLS(
+  DATA1 = df.sam, 
+  DATA2 = df.phq,
+  center1 = TRUE, scale1 = FALSE,
+  center2 = TRUE, scale2 = FALSE,
+  make_design_nominal = TRUE,
+  graphs = FALSE)
+
+# percent variance explained by each dimension
+plsc.sam.phq$TExPosition.Data$t
+```
+
+<!-- ======================================================================= -->
+
+# Session info
+
+```{r session_info}
+sessionInfo()
+```
